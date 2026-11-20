@@ -11,6 +11,7 @@ import { bookingDto, paginated } from "../lib/serialize";
 import { availableQuantity } from "../services/inventory";
 import { ensureCheckout, finalizeCheckout, reconcileIntents, reserveRental, stripeClient } from "../services/payments";
 import { completeBooking } from "../services/rentals";
+import { deliverPendingNotifications } from "../services/notifications";
 
 export function stripeWebhookRoutes() {
   const router = Router();
@@ -25,10 +26,16 @@ export function stripeWebhookRoutes() {
       throw new ApiError(400, "INVALID_WEBHOOK_SIGNATURE", "Webhook signature verification failed.");
     }
     if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
-      if (event.data.object.payment_status === "paid") await finalizeCheckout(req.context.db, req.context.client, event.data.object);
+      if (event.data.object.payment_status === "paid") {
+        const booking = await finalizeCheckout(req.context.env, req.context.db, req.context.client, event.data.object);
+        await deliverPendingNotifications(req.context.env, req.context.db, booking._id);
+      }
     } else if (event.type === "checkout.session.expired") {
       const checkout = await stripeClient(req.context.env).checkout.sessions.retrieve(event.data.object.id);
-      if (checkout.payment_status === "paid") await finalizeCheckout(req.context.db, req.context.client, checkout);
+      if (checkout.payment_status === "paid") {
+        const booking = await finalizeCheckout(req.context.env, req.context.db, req.context.client, checkout);
+        await deliverPendingNotifications(req.context.env, req.context.db, booking._id);
+      }
       else if (checkout.status === "expired" && checkout.metadata?.intentId) await req.context.db.collection<RentalIntent>("rentalIntents").updateOne({ _id: checkout.metadata.intentId, checkoutSessionId: checkout.id, status: { $in: ["creating", "open"] } }, { $set: { status: "expired" } });
     }
     success(res, { received: true });
@@ -58,7 +65,8 @@ export function bookingRoutes() {
     const sessionId = z.string().regex(/^cs_test_[A-Za-z0-9]+$/).parse(req.query.sessionId);
     const checkout = await stripeClient(req.context.env).checkout.sessions.retrieve(sessionId);
     if (checkout.client_reference_id !== req.user._id) throw new ApiError(403, "FORBIDDEN", "This payment belongs to another customer.");
-    const booking = checkout.payment_status === "paid" ? await finalizeCheckout(req.context.db, req.context.client, checkout) : null;
+    const booking = checkout.payment_status === "paid" ? await finalizeCheckout(req.context.env, req.context.db, req.context.client, checkout) : null;
+    if (booking) await deliverPendingNotifications(req.context.env, req.context.db, booking._id);
     success(res, { booking: booking ? bookingDto(booking) : null, paymentStatus: checkout.payment_status, status: checkout.status });
   });
   const rentalList = (role: "customer" | "owner" | "admin") => async (req: Parameters<typeof verifyToken>[0], res: Parameters<typeof verifyToken>[1]) => {

@@ -4,7 +4,7 @@ import { calculateRental, peakReservedQuantity } from "../src/lib/pricing";
 import { dateNumber } from "../src/lib/dates";
 import { equipmentSchema, profileSchema, escapeRegex } from "../src/lib/validation";
 import { validatePaidSession } from "../src/services/payments";
-import { completionNotificationDocuments, sendCompletionNotification } from "../src/services/notifications";
+import { bookingNotificationDocuments, completionNotificationDocuments, sendEmailNotification } from "../src/services/notifications";
 import { rentalHasEnded } from "../src/services/rentals";
 import type { Booking, EmailNotification, Env, RentalIntent } from "../src/types";
 
@@ -76,10 +76,18 @@ test("completion creates idempotent customer and owner email notifications", () 
   assert.ok(notifications.every((item) => item.text.includes("Professional Camera") && item.status === "pending"));
 });
 
-test("completion email uses provider idempotency and server-only authorization", async () => {
+test("payment confirmation creates customer and owner email notifications", () => {
+  const notifications = bookingNotificationDocuments(completedBooking, "https://gearnest.sraboni.dev", new Date("2026-11-21T00:00:00Z"));
+  assert.equal(notifications.length, 2);
+  assert.deepEqual(notifications.map((item) => item.kind), ["booking-confirmed", "booking-confirmed"]);
+  assert.ok(notifications[0].subject.includes("booking is confirmed"));
+  assert.ok(notifications[1].subject.includes("New paid rental"));
+});
+
+test("email delivery uses provider idempotency and server-only authorization", async () => {
   const notification = completionNotificationDocuments(completedBooking, "https://gearnest.sraboni.dev")[0] as EmailNotification;
   const env = { RESEND_API_KEY: "re_test_fixture", EMAIL_FROM: "GearNest <notifications@sraboni.dev>" } as Env;
-  const providerId = await sendCompletionNotification(env, notification, async (input, init) => {
+  const providerId = await sendEmailNotification(env, notification, async (input, init) => {
     assert.equal(String(input), "https://api.resend.com/emails");
     const headers = new Headers(init?.headers);
     assert.equal(headers.get("Authorization"), "Bearer re_test_fixture");

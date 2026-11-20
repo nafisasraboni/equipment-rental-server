@@ -48,6 +48,12 @@ export function equipmentRoutes() {
     success(res, rows.map(({ owners, ...equipment }) => equipmentDto(equipment, equipment.availableQuantity, owners[0])));
   });
 
+  router.get("/equipment/home", async (req, res) => {
+    const rows = await req.context.db.collection<Equipment>("equipment").aggregate<CatalogRow>([{ $match: { status: "approved", deletedAt: { $exists: false } } }, { $sort: { createdAt: -1 } }, { $limit: 6 }, ...availabilityPipeline(today())]).toArray();
+    const featured = rows.map(({ owners, ...equipment }) => equipmentDto(equipment, equipment.availableQuantity, owners[0]));
+    success(res, { featured, recent: featured.slice(0, 4) });
+  });
+
   const managedList = (admin: boolean) => async (req: Parameters<typeof verifyToken>[0], res: Parameters<typeof verifyToken>[1]) => {
     const query = pageSchema.parse(cleanQuery(req.query));
     const filter: Filter<Equipment> = { deletedAt: { $exists: false }, ...(!admin ? { ownerId: req.user._id } : {}) };

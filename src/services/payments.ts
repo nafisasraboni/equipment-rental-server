@@ -6,6 +6,7 @@ import { calculateRental } from "../lib/pricing";
 import { today } from "../lib/dates";
 import { person } from "../lib/serialize";
 import { lockEquipment, reservedQuantity } from "./inventory";
+import { enqueueBookingNotifications } from "./notifications";
 
 export function stripeClient(env: Env) {
   if (!/^(?:sk|rk)_test_/.test(env.STRIPE_SECRET_KEY ?? "")) throw new ApiError(503, "PAYMENTS_UNAVAILABLE", "Sandbox payments are not configured yet.");
@@ -19,7 +20,7 @@ export function validatePaidSession(session: Pick<Stripe.Checkout.Session, "paym
 
 export type PaymentCheckout = Pick<Stripe.Checkout.Session, "id" | "metadata" | "payment_status" | "amount_total" | "currency" | "client_reference_id" | "payment_intent">;
 
-export async function finalizeCheckout(db: Db, client: MongoClient, checkout: PaymentCheckout): Promise<Booking> {
+export async function finalizeCheckout(env: Env, db: Db, client: MongoClient, checkout: PaymentCheckout): Promise<Booking> {
   const intentId = checkout.metadata?.intentId;
   if (!intentId) throw new ApiError(400, "INVALID_PAYMENT", "Rental reservation information is missing.");
   const intent = await db.collection<RentalIntent>("rentalIntents").findOne({ _id: intentId });
@@ -33,19 +34,32 @@ export async function finalizeCheckout(db: Db, client: MongoClient, checkout: Pa
     customer: intent.customer, owner: intent.owner, equipment: intent.equipment,
     startDate: intent.startDate, endDate: intent.endDate, quantity: intent.quantity, contactNumber: intent.contactNumber, deliveryAddress: intent.deliveryAddress, notes: intent.notes,
     rentalType: intent.rentalType, rentalPriceCents: intent.rentalPriceCents, durationDays: intent.durationDays, periods: intent.periods, amountCents: intent.amountCents, currency: intent.currency,
-    checkoutSessionId: checkout.id, paymentIntentId, paymentStatus: "paid", status: "confirmed", createdAt: now, updatedAt: now
+    checkoutSessionId: checkout.id, paymentIntentId, paymentStatus: "paid", status: "confirmed",
+    bookingNotificationsQueuedAt: now, createdAt: now, updatedAt: now
   };
   const session = client.startSession();
   let result = booking;
   try {
     await session.withTransaction(async () => {
       const existing = await db.collection<Booking>("bookings").findOne({ intentId: intent._id }, { session });
-      if (existing) { result = existing; return; }
+      if (existing) {
+        result = existing;
+        if (!existing.bookingNotificationsQueuedAt) {
+          await enqueueBookingNotifications(env, db, existing, session);
+          const queuedAt = new Date();
+          await db.collection<Booking>("bookings").updateOne(
+            { _id: existing._id }, { $set: { bookingNotificationsQueuedAt: queuedAt, updatedAt: queuedAt } }, { session }
+          );
+          result = { ...existing, bookingNotificationsQueuedAt: queuedAt, updatedAt: queuedAt };
+        }
+        return;
+      }
       const current = await db.collection<RentalIntent>("rentalIntents").findOne({ _id: intent._id }, { session });
       if (!current) throw new ApiError(404, "RESERVATION_NOT_FOUND", "Rental reservation not found.");
       if (current.status === "failed" || current.status === "expired") throw new ApiError(409, "RESERVATION_RELEASED", "This reservation has already been released.");
       await db.collection<Equipment>("equipment").updateOne({ _id: current.equipmentId }, { $inc: { inventoryRevision: 1 } }, { session });
       await db.collection<Booking>("bookings").insertOne(booking, { session });
+      await enqueueBookingNotifications(env, db, booking, session);
       const payment: Payment = { _id: checkout.id, bookingId: booking._id, customerId: intent.customerId, ownerId: intent.ownerId, equipmentId: intent.equipmentId, checkoutSessionId: checkout.id, paymentIntentId, amountCents: intent.amountCents, currency: intent.currency, status: "paid", createdAt: now };
       await db.collection<Payment>("payments").insertOne(payment, { session });
       await db.collection<RentalIntent>("rentalIntents").updateOne({ _id: intent._id }, { $set: { status: "consumed", checkoutSessionId: checkout.id } }, { session });
@@ -98,7 +112,7 @@ export async function reconcileIntents(env: Env, db: Db, client: MongoClient, eq
   for (const intent of intents) {
     try {
       const checkout = intent.checkoutSessionId ? await stripeClient(env).checkout.sessions.retrieve(intent.checkoutSessionId) : await createStripeSession(env, intent);
-      if (checkout.payment_status === "paid") await finalizeCheckout(db, client, checkout);
+      if (checkout.payment_status === "paid") await finalizeCheckout(env, db, client, checkout);
       else if (checkout.status === "expired") await db.collection<RentalIntent>("rentalIntents").updateOne({ _id: intent._id, status: { $in: ["creating", "open"] } }, { $set: { status: "expired", checkoutSessionId: checkout.id } });
       else if (!intent.checkoutSessionId) await db.collection<RentalIntent>("rentalIntents").updateOne({ _id: intent._id, status: "creating" }, { $set: { status: "open", checkoutSessionId: checkout.id, ...(checkout.url ? { checkoutUrl: checkout.url } : {}) } });
     } catch (error) {

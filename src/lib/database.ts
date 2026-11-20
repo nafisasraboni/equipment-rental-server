@@ -1,14 +1,30 @@
 import { MongoClient, type Db } from "mongodb";
 import type { Booking, EmailNotification, Env, Equipment, RentalIntent, User } from "../types";
 
-export async function withDatabase<T>(env: Env, operation: (db: Db, client: MongoClient) => Promise<T>): Promise<T> {
-  const client = new MongoClient(env.MONGODB_URI, { maxPoolSize: 2, minPoolSize: 0, serverSelectionTimeoutMS: 7000, connectTimeoutMS: 7000, socketTimeoutMS: 20_000 });
-  try {
-    await client.connect();
-    return await operation(client.db(env.MONGODB_DB ?? "gearnest"), client);
-  } finally {
-    await client.close();
+let sharedConnection: { uri: string; client: MongoClient; ready: Promise<MongoClient> } | undefined;
+
+function databaseClient(uri: string) {
+  if (!sharedConnection || sharedConnection.uri !== uri) {
+    const client = new MongoClient(uri, {
+      maxPoolSize: 5,
+      minPoolSize: 0,
+      maxIdleTimeMS: 60_000,
+      serverSelectionTimeoutMS: 7000,
+      connectTimeoutMS: 7000,
+      socketTimeoutMS: 20_000
+    });
+    const connection = { uri, client, ready: client.connect() };
+    connection.ready.catch(() => {
+      if (sharedConnection === connection) sharedConnection = undefined;
+    });
+    sharedConnection = connection;
   }
+  return sharedConnection.ready;
+}
+
+export async function withDatabase<T>(env: Env, operation: (db: Db, client: MongoClient) => Promise<T>): Promise<T> {
+  const client = await databaseClient(env.MONGODB_URI);
+  return operation(client.db(env.MONGODB_DB ?? "gearnest"), client);
 }
 
 export async function ensureIndexes(db: Db) {
@@ -19,6 +35,7 @@ export async function ensureIndexes(db: Db) {
     db.collection<Booking>("bookings").createIndex({ customerId: 1, createdAt: -1 }),
     db.collection<Booking>("bookings").createIndex({ ownerId: 1, createdAt: -1 }),
     db.collection<Booking>("bookings").createIndex({ status: 1, endDate: 1, completionNotificationsQueuedAt: 1 }),
+    db.collection<Booking>("bookings").createIndex({ paymentStatus: 1, bookingNotificationsQueuedAt: 1, createdAt: 1 }),
     db.collection<Booking>("bookings").createIndex({ intentId: 1 }, { unique: true }),
     db.collection<Booking>("bookings").createIndex({ checkoutSessionId: 1 }, { unique: true }),
     db.collection<RentalIntent>("rentalIntents").createIndex({ customerId: 1, requestId: 1 }, { unique: true }),

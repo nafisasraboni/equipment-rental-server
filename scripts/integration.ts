@@ -42,7 +42,7 @@ const api = createServer(createApp(() => ({ env, db, client })));
 const origin = await listen(api);
 const tokens = await Promise.all(users.map((user) => new SignJWT({ role: user.role }).setProtectedHeader({ alg: "RS256", kid: jwk.kid }).setSubject(user._id).setIssuer(issuer).setAudience(env.JWT_AUDIENCE).setIssuedAt().setExpirationTime("5m").sign(privateKey)));
 let assertions = 0;
-const responseDataSchema = z.object({ id: z.string().optional(), status: z.string().optional(), items: z.array(z.object({ id: z.string().optional() }).passthrough()).optional(), totalAmountCents: z.number().optional(), totalEarningsCents: z.number().optional(), completedRentals: z.number().optional(), monthlyEarnings: z.array(z.unknown()).optional() }).passthrough();
+const responseDataSchema = z.object({ id: z.string().optional(), status: z.string().optional(), items: z.array(z.object({ id: z.string().optional() }).passthrough()).optional(), featured: z.array(z.object({ id: z.string().optional() }).passthrough()).optional(), recent: z.array(z.object({ id: z.string().optional() }).passthrough()).optional(), totalAmountCents: z.number().optional(), totalEarningsCents: z.number().optional(), completedRentals: z.number().optional(), monthlyEarnings: z.array(z.unknown()).optional() }).passthrough();
 const responseSchema = z.object({ success: z.boolean(), data: z.union([responseDataSchema, z.array(responseDataSchema)]).optional(), error: z.unknown().optional() }).passthrough();
 async function request(path: string, options: { method?: string; body?: unknown; token?: number; origin?: string } = {}) {
   const response = await fetch(`${origin}/api${path}`, { method: options.method ?? "GET", headers: { ...(options.body ? { "Content-Type": "application/json" } : {}), ...(options.token !== undefined ? { Authorization: `Bearer ${tokens[options.token]}` } : {}), ...(options.origin ? { Origin: options.origin } : {}) }, body: options.body ? JSON.stringify(options.body) : undefined });
@@ -72,6 +72,8 @@ try {
   const catalog = await request(`/equipment?search=${encodeURIComponent(name)}&category=photography&minPrice=29&maxPrice=31&availability=available&sort=price_asc`);
   check(catalog.status === 200 && catalog.body.data.items?.some((item) => item.id === equipmentId), "Backend search/filter/sort returns approved equipment");
   check(((await request("/equipment/featured")).body.data.items?.length ?? 7) <= 6, "Featured equipment is limited to6");
+  const homeEquipment = await request("/equipment/home");
+  check((homeEquipment.body.data.featured?.length ?? 7) <= 6 && (homeEquipment.body.data.recent?.length ?? 5) <= 4, "Homepage equipment uses one bounded API response");
   await request(`/favorites/${equipmentId}`, { token: 0, method: "PUT" });
   await request(`/favorites/${equipmentId}`, { token: 0, method: "PUT" });
   const favorites = await request("/favorites", { token: 0 });
@@ -91,10 +93,11 @@ try {
   check(heldEquipment?.status === "pending", "Owner edits return equipment to review");
   await request(`/admin/equipment/${equipmentId}/status`, { token: 4, method: "PATCH", body: { status: "approved" } });
   const checkout: PaymentCheckout = { id: `cs_test_${crypto.randomUUID().replace(/-/g, "")}`, metadata: { intentId: intent._id }, payment_status: "paid", amount_total: intent.amountCents, currency: "usd", client_reference_id: intent.customerId, payment_intent: `pi_test_${crypto.randomUUID().replace(/-/g, "")}` };
-  const paid = await Promise.all([finalizeCheckout(db, client, checkout), finalizeCheckout(db, client, checkout)]);
+  const paid = await Promise.all([finalizeCheckout(env, db, client, checkout), finalizeCheckout(env, db, client, checkout)]);
   check(paid[0]._id === paid[1]._id, "Concurrent fulfillment returns one booking");
   check(await db.collection("bookings").countDocuments({ intentId: intent._id }) === 1, "One booking is saved for repeated payment completion");
   check(await db.collection("payments").countDocuments({ checkoutSessionId: checkout.id }) === 1, "One transaction is saved for repeated payment completion");
+  check(await db.collection("emailNotifications").countDocuments({ bookingId: paid[0]._id, kind: "booking-confirmed" }) === 2, "Payment queues customer and owner confirmation emails once");
 
   const payload = JSON.stringify({ id: `evt_test_${crypto.randomUUID()}`, object: "event", type: "checkout.session.completed", data: { object: checkout } });
   const timestamp = Math.floor(Date.now() / 1000);
@@ -106,7 +109,7 @@ try {
   check((await request(`/admin/bookings/${paid[0]._id}`, { token: 4, method: "PATCH", body: { status: "completed" } })).status === 409, "A rental cannot complete before its inclusive end date");
   const completed = await completeBooking(env, db, client, paid[0]._id, offsetDate(5));
   check(completed.status === "completed", "An ended rental is completed by the shared scheduled service");
-  check(await db.collection("emailNotifications").countDocuments({ bookingId: completed._id }) === 2, "Completion queues one idempotent email for customer and owner");
+  check(await db.collection("emailNotifications").countDocuments({ bookingId: completed._id, kind: "rental-completed" }) === 2, "Completion queues one idempotent email for customer and owner");
   const winningUser = users.findIndex((user) => user._id === intent.customerId);
   const losingUser = winningUser === 0 ? 1 : 0;
   check((await request("/customer/bookings", { token: winningUser })).body.data.items?.length === 1, "Customer sees only their paid rental");

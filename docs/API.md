@@ -8,7 +8,8 @@ Protected endpoints require `Authorization: Bearer <JWT>` issued by the client's
 |---|---|---|
 | GET `/api/health` | Public | Database connectivity |
 | GET `/api/equipment` | Public | Search/filter/sort/paginate approved equipment |
-| GET `/api/equipment/featured` | Public | Up to6 approved items |
+| GET `/api/equipment/featured` | Public | Up to 6 approved items |
+| GET `/api/equipment/home` | Public | Featured and recent homepage equipment in one response |
 | GET `/api/equipment/:id` | Authenticated | Customers view approved items; managers may view their pending items |
 | POST `/api/equipment` | Owner | Create pending equipment |
 | PATCH `/api/equipment/:id` | Owner/Admin | Partial equipment update; ownership enforced |
@@ -41,4 +42,4 @@ Checkout adds `{ contactNumber, deliveryAddress, notes, requestId }`; `requestId
 
 Equipment price/stock fields: `rentalPriceCents`, `rentalType`, `quantity` (total inventory), `availableQuantity` (computed current availability). Other fields match `src/types.ts`; wire objects replace `_id` with `id`. Owner and booking person snapshots contain id/name/email/image. Favorite equipment can be null when its listing is unpublished or removed.
 
-Bookings are completed automatically by the scheduled job after the inclusive end date has passed. Customer and owner emails are persisted in `emailNotifications` before delivery, retried with leases/backoff, and sent with deterministic provider idempotency keys.
+Paid bookings immediately queue customer and owner confirmation emails. Bookings are completed automatically by the scheduled job after the inclusive end date has passed, which queues a second completion notification for both parties. Emails are persisted in `emailNotifications` before delivery, retried with leases/backoff, and sent with deterministic provider idempotency keys.

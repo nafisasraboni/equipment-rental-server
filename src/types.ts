@@ -111,6 +111,7 @@ export interface Booking extends RentalInput {
   paymentIntentId: string | null;
   paymentStatus: "paid";
   status: "confirmed" | "completed";
+  bookingNotificationsQueuedAt?: Date;
   completedAt?: Date;
   completionNotificationsQueuedAt?: Date;
   createdAt: Date;
@@ -120,7 +121,7 @@ export interface Booking extends RentalInput {
 export interface EmailNotification {
   _id: string;
   bookingId: string;
-  kind: "rental-completed";
+  kind: "booking-confirmed" | "rental-completed";
   audience: "customer" | "owner";
   recipient: string;
   subject: string;
