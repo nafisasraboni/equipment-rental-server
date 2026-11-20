@@ -4,7 +4,7 @@ import { handleAsNodeRequest } from "cloudflare:node";
 import { createApp } from "./app";
 import type { Env, RequestContext } from "./types";
 import { withDatabase } from "./lib/database";
-import { reconcileIntents } from "./services/payments";
+import { runScheduledJobs } from "./services/scheduled";
 
 const requestContext = new AsyncLocalStorage<RequestContext>();
 const app = createApp(() => {
@@ -27,6 +27,6 @@ export default {
     }
   },
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
-    await withDatabase(env, (db, client) => reconcileIntents(env, db, client));
+    await withDatabase(env, (db, client) => runScheduledJobs(env, db, client));
   }
 };

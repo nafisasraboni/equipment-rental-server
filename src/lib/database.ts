@@ -1,5 +1,5 @@
 import { MongoClient, type Db } from "mongodb";
-import type { Booking, Env, Equipment, RentalIntent, User } from "../types";
+import type { Booking, EmailNotification, Env, Equipment, RentalIntent, User } from "../types";
 
 export async function withDatabase<T>(env: Env, operation: (db: Db, client: MongoClient) => Promise<T>): Promise<T> {
   const client = new MongoClient(env.MONGODB_URI, { maxPoolSize: 2, minPoolSize: 0, serverSelectionTimeoutMS: 7000, connectTimeoutMS: 7000, socketTimeoutMS: 20_000 });
@@ -18,12 +18,14 @@ export async function ensureIndexes(db: Db) {
     db.collection<Booking>("bookings").createIndex({ equipmentId: 1, startDate: 1, endDate: 1 }),
     db.collection<Booking>("bookings").createIndex({ customerId: 1, createdAt: -1 }),
     db.collection<Booking>("bookings").createIndex({ ownerId: 1, createdAt: -1 }),
+    db.collection<Booking>("bookings").createIndex({ status: 1, endDate: 1, completionNotificationsQueuedAt: 1 }),
     db.collection<Booking>("bookings").createIndex({ intentId: 1 }, { unique: true }),
     db.collection<Booking>("bookings").createIndex({ checkoutSessionId: 1 }, { unique: true }),
     db.collection<RentalIntent>("rentalIntents").createIndex({ customerId: 1, requestId: 1 }, { unique: true }),
     db.collection<RentalIntent>("rentalIntents").createIndex({ equipmentId: 1, status: 1, endDate: 1 }),
     db.collection("payments").createIndex({ checkoutSessionId: 1 }, { unique: true }),
     db.collection("payments").createIndex({ ownerId: 1, createdAt: 1 }),
+    db.collection<EmailNotification>("emailNotifications").createIndex({ status: 1, nextAttemptAt: 1, leaseUntil: 1 }),
     db.collection("favorites").createIndex({ customerId: 1, equipmentId: 1 }, { unique: true }),
     db.collection<User>("users").createIndex({ role: 1, status: 1 }),
     db.collection<User>("users").createIndex({ email: 1 }, { unique: true, name: "users_email_uidx" }),

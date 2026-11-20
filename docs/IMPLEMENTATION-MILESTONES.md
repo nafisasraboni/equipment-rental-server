@@ -13,4 +13,5 @@ These completed feature groups are retained for the user-owned two-day commit ha
 9. Calculate rental periods and serialize inventory reservations — src/lib/pricing.ts, src/services/inventory.ts.
 10. Integrate hosted Checkout, reservation reconciliation, and idempotent fulfillment — src/services/payments.ts.
 11. Expose rental dashboards, signed Stripe webhooks, analytics, and authenticated uploads — src/routes/bookings.ts, src/routes/analytics.ts, src/routes/uploads.ts.
-12. Connect Worker/local HTTP lifecycle and validate delivery — src/app.ts, src/index.ts, src/node.ts, tests/rentals.test.ts, scripts/integration.ts, README.md, docs/API.md.
+12. Automate ended-rental completion and retry-safe customer/owner email notifications — src/services/rentals.ts, src/services/notifications.ts, src/services/scheduled.ts.
+13. Connect Worker/local HTTP lifecycle and validate delivery — src/app.ts, src/index.ts, src/node.ts, tests/rentals.test.ts, scripts/integration.ts, README.md, docs/API.md.

@@ -24,7 +24,7 @@ Protected endpoints require `Authorization: Bearer <JWT>` issued by the client's
 | GET `/api/customer/bookings` | Customer | Own paid bookings |
 | GET `/api/owner/bookings` | Owner | Bookings for own equipment |
 | GET `/api/admin/bookings` | Admin | All bookings |
-| PATCH `/api/admin/bookings/:id` | Admin | Confirm/complete booking; completion requires finished dates |
+| PATCH `/api/admin/bookings/:id` | Admin | Complete an ended booking and queue customer/owner emails |
 | GET `/api/admin/users` | Admin | Paginated users |
 | PATCH `/api/admin/users/:id` | Admin | Change role/status; last-admin protection |
 | GET `/api/admin/equipment` | Admin | All active listings, optional status filter |
@@ -40,3 +40,5 @@ Quote request: `{ equipmentId, startDate, endDate, quantity }`. Quote response: 
 Checkout adds `{ contactNumber, deliveryAddress, notes, requestId }`; `requestId` is a fresh UUID per distinct attempt and stays unchanged for a retry. Response: `{ url, intentId, sessionId }`. Verify returns `{ booking, paymentStatus, status }`; only provider-confirmed paid sessions generate bookings.
 
 Equipment price/stock fields: `rentalPriceCents`, `rentalType`, `quantity` (total inventory), `availableQuantity` (computed current availability). Other fields match `src/types.ts`; wire objects replace `_id` with `id`. Owner and booking person snapshots contain id/name/email/image. Favorite equipment can be null when its listing is unpublished or removed.
+
+Bookings are completed automatically by the scheduled job after the inclusive end date has passed. Customer and owner emails are persisted in `emailNotifications` before delivery, retried with leases/backoff, and sent with deterministic provider idempotency keys.

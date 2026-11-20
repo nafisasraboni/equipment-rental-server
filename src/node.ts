@@ -1,9 +1,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { existsSync } from "node:fs";
 import { createServer } from "node:http";
+import cron from "node-cron";
 import { createApp } from "./app";
 import { withDatabase } from "./lib/database";
 import type { Env, RequestContext } from "./types";
+import { runScheduledJobs } from "./services/scheduled";
 
 if (existsSync(".env")) process.loadEnvFile(".env");
 const origin = process.env.CLIENT_ORIGIN ?? "http://localhost:3000";
@@ -17,6 +19,8 @@ const env: Env = {
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY ?? "",
   STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET ?? "",
   IMGBB_API_KEY: process.env.IMGBB_API_KEY ?? "",
+  RESEND_API_KEY: process.env.RESEND_API_KEY,
+  EMAIL_FROM: process.env.EMAIL_FROM,
   CURRENCY: "USD"
 };
 const context = new AsyncLocalStorage<RequestContext>();
@@ -41,3 +45,8 @@ const server = createServer(async (req, res) => {
   }
 });
 server.listen(port, "127.0.0.1", () => console.log(`GearNest API listening at http://localhost:${port}`));
+
+cron.schedule("*/5 * * * *", async () => {
+  try { await withDatabase(env, (db, client) => runScheduledJobs(env, db, client)); }
+  catch (error) { console.error("Scheduled GearNest jobs failed", { type: error instanceof Error ? error.name : "UnknownError" }); }
+}, { name: "gearnest-rental-completion", timezone: "Asia/Dhaka", noOverlap: true, unref: true });

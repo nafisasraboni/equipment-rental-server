@@ -14,6 +14,8 @@ export interface Env {
   STRIPE_SECRET_KEY: string;
   STRIPE_WEBHOOK_SECRET: string;
   IMGBB_API_KEY: string;
+  RESEND_API_KEY?: string;
+  EMAIL_FROM?: string;
   CURRENCY?: string;
 }
 
@@ -109,6 +111,27 @@ export interface Booking extends RentalInput {
   paymentIntentId: string | null;
   paymentStatus: "paid";
   status: "confirmed" | "completed";
+  completedAt?: Date;
+  completionNotificationsQueuedAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface EmailNotification {
+  _id: string;
+  bookingId: string;
+  kind: "rental-completed";
+  audience: "customer" | "owner";
+  recipient: string;
+  subject: string;
+  text: string;
+  status: "pending" | "sending" | "failed" | "sent";
+  attempts: number;
+  nextAttemptAt: Date;
+  leaseUntil?: Date;
+  sentAt?: Date;
+  providerId?: string;
+  lastError?: string;
   createdAt: Date;
   updatedAt: Date;
 }

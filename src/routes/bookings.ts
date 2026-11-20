@@ -10,6 +10,7 @@ import { calculateRental } from "../lib/pricing";
 import { bookingDto, paginated } from "../lib/serialize";
 import { availableQuantity } from "../services/inventory";
 import { ensureCheckout, finalizeCheckout, reconcileIntents, reserveRental, stripeClient } from "../services/payments";
+import { completeBooking } from "../services/rentals";
 
 export function stripeWebhookRoutes() {
   const router = Router();
@@ -71,12 +72,8 @@ export function bookingRoutes() {
   router.get("/admin/bookings", verifyToken, verifyAdmin, rentalList("admin"));
   router.patch("/admin/bookings/:id", verifyToken, verifyAdmin, async (req, res) => {
     const id = idSchema.parse(req.params.id);
-    const body = z.object({ status: z.enum(["confirmed", "completed"]) }).strict().parse(req.body);
-    const current = await req.context.db.collection<Booking>("bookings").findOne({ _id: id });
-    if (!current) throw new ApiError(404, "BOOKING_NOT_FOUND", "Booking not found.");
-    if (body.status === "completed" && current.endDate >= today()) throw new ApiError(409, "RENTAL_NOT_FINISHED", "A rental can be completed after its end date has passed.");
-    const booking = await req.context.db.collection<Booking>("bookings").findOneAndUpdate({ _id: id }, { $set: { status: body.status, updatedAt: new Date() } }, { returnDocument: "after" });
-    success(res, bookingDto(booking!));
+    z.object({ status: z.literal("completed") }).strict().parse(req.body);
+    success(res, bookingDto(await completeBooking(req.context.env, req.context.db, req.context.client, id)));
   });
   return router;
 }

@@ -12,7 +12,8 @@
     "CURRENCY": "USD",
     "CLIENT_ORIGIN": "https://gearnest.sraboni.dev",
     "AUTH_ISSUER": "https://gearnest.sraboni.dev",
-    "JWT_AUDIENCE": "https://api.gearnest.sraboni.dev"
+    "JWT_AUDIENCE": "https://api.gearnest.sraboni.dev",
+    "EMAIL_FROM": "GearNest <notifications@sraboni.dev>"
   },
   "triggers": { "crons": ["*/5 * * * *"] }
 }

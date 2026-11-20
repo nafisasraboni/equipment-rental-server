@@ -9,6 +9,7 @@ import { createApp } from "../src/app";
 import { ensureIndexes } from "../src/lib/database";
 import { today } from "../src/lib/dates";
 import { reserveRental, finalizeCheckout, type PaymentCheckout } from "../src/services/payments";
+import { completeBooking } from "../src/services/rentals";
 import type { Env, Equipment, RentalIntent, User } from "../src/types";
 
 if (existsSync(".env")) process.loadEnvFile(".env");
@@ -41,7 +42,7 @@ const api = createServer(createApp(() => ({ env, db, client })));
 const origin = await listen(api);
 const tokens = await Promise.all(users.map((user) => new SignJWT({ role: user.role }).setProtectedHeader({ alg: "RS256", kid: jwk.kid }).setSubject(user._id).setIssuer(issuer).setAudience(env.JWT_AUDIENCE).setIssuedAt().setExpirationTime("5m").sign(privateKey)));
 let assertions = 0;
-const responseDataSchema = z.object({ id: z.string().optional(), status: z.string().optional(), items: z.array(z.object({ id: z.string().optional() }).passthrough()).optional(), totalAmountCents: z.number().optional(), totalEarningsCents: z.number().optional(), monthlyEarnings: z.array(z.unknown()).optional() }).passthrough();
+const responseDataSchema = z.object({ id: z.string().optional(), status: z.string().optional(), items: z.array(z.object({ id: z.string().optional() }).passthrough()).optional(), totalAmountCents: z.number().optional(), totalEarningsCents: z.number().optional(), completedRentals: z.number().optional(), monthlyEarnings: z.array(z.unknown()).optional() }).passthrough();
 const responseSchema = z.object({ success: z.boolean(), data: z.union([responseDataSchema, z.array(responseDataSchema)]).optional(), error: z.unknown().optional() }).passthrough();
 async function request(path: string, options: { method?: string; body?: unknown; token?: number; origin?: string } = {}) {
   const response = await fetch(`${origin}/api${path}`, { method: options.method ?? "GET", headers: { ...(options.body ? { "Content-Type": "application/json" } : {}), ...(options.token !== undefined ? { Authorization: `Bearer ${tokens[options.token]}` } : {}), ...(options.origin ? { Origin: options.origin } : {}) }, body: options.body ? JSON.stringify(options.body) : undefined });
@@ -102,6 +103,10 @@ try {
   check(webhook.status === 200, "A correctly signed raw webhook can fulfill idempotently");
   const invalidWebhook = await fetch(`${origin}/api/webhooks/stripe`, { method: "POST", headers: { "Content-Type": "application/json", "Stripe-Signature": `t=${timestamp},v1=invalid` }, body: payload });
   check(invalidWebhook.status === 400, "Invalid webhook signatures are rejected");
+  check((await request(`/admin/bookings/${paid[0]._id}`, { token: 4, method: "PATCH", body: { status: "completed" } })).status === 409, "A rental cannot complete before its inclusive end date");
+  const completed = await completeBooking(env, db, client, paid[0]._id, offsetDate(5));
+  check(completed.status === "completed", "An ended rental is completed by the shared scheduled service");
+  check(await db.collection("emailNotifications").countDocuments({ bookingId: completed._id }) === 2, "Completion queues one idempotent email for customer and owner");
   const winningUser = users.findIndex((user) => user._id === intent.customerId);
   const losingUser = winningUser === 0 ? 1 : 0;
   check((await request("/customer/bookings", { token: winningUser })).body.data.items?.length === 1, "Customer sees only their paid rental");
@@ -110,6 +115,7 @@ try {
   check((await request("/owner/bookings", { token: 3 })).body.data.items?.length === 0, "Other owners cannot see equipment rentals");
   const ownerAnalytics = await request("/owner/analytics", { token: 2 });
   check(ownerAnalytics.body.data.totalEarningsCents === 9000, "Owner earnings derive from paid transaction records");
+  check(ownerAnalytics.body.data.completedRentals === 1, "Completed rentals update owner analytics");
   check(ownerAnalytics.body.data.monthlyEarnings?.length === 12, "Owner charts include all12 months");
   check((await request(`/admin/users/${users[losingUser]._id}`, { token: 4, method: "PATCH", body: { status: "suspended" } })).status === 200, "Admin can suspend another account");
   check((await request("/me", { token: losingUser })).status === 403, "Previously issued JWT cannot bypass current suspension");
@@ -121,6 +127,7 @@ try {
   await close(api);
   await close(jwks);
   await db.collection("payments").deleteMany({ customerId: { $in: userIds } });
+  await db.collection("emailNotifications").deleteMany({ bookingId: { $in: await db.collection("bookings").distinct("_id", { customerId: { $in: userIds } }) } });
   await db.collection("bookings").deleteMany({ customerId: { $in: userIds } });
   await db.collection("rentalIntents").deleteMany({ customerId: { $in: userIds } });
   await db.collection("favorites").deleteMany({ customerId: { $in: userIds } });
