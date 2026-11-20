@@ -33,7 +33,7 @@ The integration command requires a reachable MongoDB database. It creates unique
 
 Use `.dev.vars` for Wrangler development and Worker secrets for production. Keep `MONGODB_URI`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `IMGBB_API_KEY`, and `RESEND_API_KEY` server-only. Configure `CLIENT_ORIGIN`, `AUTH_ISSUER`, `JWT_AUDIENCE`, and a verified `EMAIL_FROM` sender for the deployed client/API URLs. `MONGODB_DB` defaults to `gearnest`.
 
-Deploy with `npm run deploy` after secrets and MongoDB network access are configured. Run the exported `ensureIndexes(db)` once during bootstrap. MongoDB clients are reused within warm Worker instances to avoid reconnecting for every request. Every five minutes, Node Cron in local Express or Cloudflare's production Cron Trigger reconciles Checkout reservations, completes rentals whose inclusive end date has passed, backfills missing booking notifications, and delivers queued emails with retry-safe provider idempotency.
+Deploy with `npm run deploy` after secrets and MongoDB network access are configured. Run the exported `ensureIndexes(db)` once during bootstrap. Every five minutes, Node Cron in local Express or Cloudflare's production Cron Trigger reconciles Checkout reservations, completes rentals whose inclusive end date has passed, backfills missing booking notifications, and delivers queued emails with retry-safe provider idempotency.
 
 Live API: https://api.gearnest.sraboni.dev
 
